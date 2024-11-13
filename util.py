@@ -21,7 +21,7 @@ class Util:
                 return f.read()
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error reading text file: {str(e)}")
-    def cleanText(text: str) -> str:
+    def cleanText(self, text: str) -> str:
         cleanedText = text.replace('\n', ' ').replace('\\', ' ')
         cleanedText = ' '.join(cleanedText.split())
 
