@@ -1,12 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 import mimetypes
-from PyPDF2 import PdfReader
 import tempfile
-from typing import Dict, List
 import os
 import json
-import fitz
 from extract_text import PIIExtractor
 from util import Util
 

@@ -1,0 +1,9 @@
+fastapi
+mimetypes
+PyPDF2
+tempfile
+typing
+json
+fitz
+presidio_analyzer
+re
