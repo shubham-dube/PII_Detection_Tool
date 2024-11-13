@@ -1,64 +1,74 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 import mimetypes
 from PyPDF2 import PdfReader
 import tempfile
+from typing import Dict, List
 import os
+import json
+import fitz
 from extract_text import PIIExtractor
+from util import Util
 
 app = FastAPI()
-
-def extractPDFText(file_path: str) -> str:
-    try:
-        reader = PdfReader(file_path)
-        text = ''
-        for page in reader.pages:
-            text += page.extract_text()
-        return text
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading PDF file: {str(e)}")
-
-def extractTextFileContent(file_path: str) -> str:
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading text file: {str(e)}")
     
-def cleanText(text: str) -> str:
-    cleanedText = text.replace('\n', ' ').replace('\\', ' ')
-    cleanedText = ' '.join(cleanedText.split())
-
-    return cleanedText
-
 @app.post('/api/v1/getSensitiveData')
 async def getSensitiveData(file: UploadFile = File(...)):
+    util = Util()
+    piiObject = PIIExtractor()
     fileType, _ = mimetypes.guess_type(file.filename)
 
     with tempfile.NamedTemporaryFile(delete=False) as tempFile:
         tempFile.write(await file.read())
         tempFilePath = tempFile.name
     
-    fileText = ""
+    if fileType == 'application/pdf':
+        fileText = util.extractPDFText(tempFilePath)
+    elif 'text' in fileType:
+        fileText = util.extractTextFileContent(tempFilePath)
+    else:
+        os.remove(tempFilePath) 
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {fileType}")
+    
+    os.remove(tempFilePath) 
+    sensitiveData = piiObject.getAllSensitiveData(util.cleanText(fileText))
+    return sensitiveData
+
+@app.post('/api/v1/redactSensitiveData')
+async def redactSensitiveData(replacements: str, file: UploadFile = File(...) ):
+    util = Util()
+    try:
+        replacementsObj = json.loads(replacements)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format for replacements")
+    
+    name, fileExt = os.path.splitext(file.filename)
+    fileType, _ = mimetypes.guess_type(file.filename)
+
+    with tempfile.NamedTemporaryFile(delete=False) as tempFile:
+        tempFile.write(await file.read())
+        tempFilePath = tempFile.name
     
     if fileType == 'application/pdf':
-        fileText = extractPDFText(tempFilePath)
+        util.maskWordsInPDF(tempFilePath, replacementsObj)
+        return FileResponse(tempFilePath, media_type=fileType, filename=os.path.basename(f"{name}_REDACTED"))
 
-    
     elif 'text' in fileType:
-        fileText = extractTextFileContent(tempFilePath)
-    
+        fileText = util.extractTextFileContent(tempFilePath)
+        redactedText =util.maskWordsInText(util.cleanText(fileText), replacementsObj)
+
+        output_file_path = tempfile.mktemp(suffix=fileExt)
+
+        with open(output_file_path, 'w', encoding='utf-8') as f:
+            f.write(redactedText)
+
+        os.remove(tempFilePath) 
+        return FileResponse(output_file_path, media_type=fileType, filename=os.path.basename(f"{name}_REDACTED"))
+
     else:
         os.remove(tempFilePath) 
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {fileType}")
 
-    os.remove(tempFilePath)
-
-    piiObject = PIIExtractor()
-
-    object = piiObject.find_pii_in_text(cleanText(fileText))
-    print(object)
-
-    return object
 
 if __name__ == "__main__":
     import uvicorn

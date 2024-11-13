@@ -1,69 +1,48 @@
 import re
-import pdfplumber
-import os
+from presidio_analyzer import AnalyzerEngine
+
+analyzer = AnalyzerEngine()
 
 class PIIExtractor:
     def __init__(self):
-        self.aadhaar_regex = r"\b\d{4}\s?\d{4}\s?\d{4}\b"
+        self.aadhaar_regex = r"\b\d{4}\s?\d{4}\s?\d{4}\b" 
         self.pan_regex = r"\b[A-Z]{5}\d{4}[A-Z]\b"
-        self.dl_regex = r"\b[A-Z]{2}\d{2}\s?\d{7}\b"
+        self.ATM_CARD_PATTERN = r'\b\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\b'
+        self.DRIVING_LICENSE_PATTERN = r'\b[A-Z]{2}\d{2}\s?\d{4}\s?\d{4}\b'
+        self.PASSPORT_PATTERN = r'\b[A-Z]{1}\d{7}\b'
         self.voter_id_regex = r"\b[A-Z]{3}\s?\d{7}\b"
 
-    def extract_text_from_pdf(self, file_path):
-        text = ''
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() + '\n'
-        return text
+    
+    def getAllSensitiveData(self, text):
+        aadhaarNums = re.findall(self.aadhaar_regex,  text)
+        PANs = re.findall(self.pan_regex, text)
+        DLs = re.findall(self.DRIVING_LICENSE_PATTERN, text)
+        voterIDs = re.findall(self.voter_id_regex, text)
+        ATMs = re.findall(self.ATM_CARD_PATTERN, text)
+        passports = re.findall(self.PASSPORT_PATTERN, text)
 
-    def extract_text_from_file(self, file_path):
-        with open(file_path, 'r') as file:
-            text = file.read()
-        return text
+        text = re.sub(self.aadhaar_regex, "[AADHAAR REDACTED]", text)
+        text = re.sub(self.pan_regex,"[PAN REDACTED]", text)
+        text = re.sub(self.DRIVING_LICENSE_PATTERN,"[DRIVING LICENCE REDACTED]", text)
+        text = re.sub(self.voter_id_regex,"[EPIC REDACTED]", text)
+        text = re.sub(self.ATM_CARD_PATTERN,"[ATM NUMBER REDACTED]", text)
+        text = re.sub(self.PASSPORT_PATTERN,"[PASSPORT REDACTED]", text)
 
-    def extract_text_from_string(self, input_string):
-        return input_string
-
-    def find_pii_in_text(self, text):
-        aadhaar_matches = re.findall(self.aadhaar_regex, text)
-        pan_matches = re.findall(self.pan_regex, text)
-        dl_matches = re.findall(self.dl_regex, text)
-        voter_id_matches = re.findall(self.voter_id_regex, text)
-
-        return {
-            'Aadhaar': aadhaar_matches,
-            'PAN': pan_matches,
-            'Driver’s License': dl_matches,
-            'Voter ID': voter_id_matches
+        returnObj = {
+            "Aadhaar": aadhaarNums,
+            "PAN": PANs,
+            "DL": DLs,
+            "Voter": voterIDs,
+            "ATM": ATMs,
+            "Passport": passports
         }
 
-if __name__ == "__main__":
-    extractor = PIIExtractor()
+        results = analyzer.analyze(text=text, language="en")
 
-    user_input = input("Enter the file path (PDF/TXT) or a string with PII data: ")
+        for i in results:
+            if(i.entity_type not in returnObj):
+                returnObj[i.entity_type] = []
 
-    if os.path.isfile(user_input):
-        if user_input.lower().endswith('.pdf'):
-            extracted_text = extractor.extract_text_from_pdf(user_input)
-            pii_matches = extractor.find_pii_in_text(extracted_text)
-            input_type = "PDF File"
-
-        elif user_input.lower().endswith('.txt'):
-            extracted_text = extractor.extract_text_from_file(user_input)
-            pii_matches = extractor.find_pii_in_text(extracted_text)
-            input_type = "Text File"
-        else:
-            print("Unsupported file format. Please provide a PDF or TXT file.")
-            exit(1)
-    else:
-        extracted_text = extractor.extract_text_from_string(user_input)
-        pii_matches = extractor.find_pii_in_text(extracted_text)
-        input_type = "String"
-
-    print(f"\nDetected PII from {input_type}:")
-    for pii_type, matches in pii_matches.items():
-        if matches:
-            print(f"{pii_type}: {matches}")
-        else:
-            print(f"No {pii_type} found in {input_type}.")
-
+            returnObj[i.entity_type].append(text[i.start: i.end])
+            
+        return returnObj
